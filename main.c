@@ -1,78 +1,62 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include "memory.h"
+
 #include <unistd.h>
+#include <stdlib.h>
 
 #include <sys/wait.h>
 #include <sys/types.h>
 
-#define INPUT_CAPACITY 1024
-#define TOKENS_CAPACITY 512
+#define INPUT_CAPACITY 4096
+#define TOKENS_CAPACITY 1024
+
+Arena a = {0};
 
 char *input(void) {
-	char *line = NULL;
-	size_t length = 0;
+	char *line = arena_alloc(&a, INPUT_CAPACITY);
 
-	if (!(getline(&line, &length, stdin))) {
+	if (!(fgets(line, INPUT_CAPACITY, stdin))) {
 		fputs("Failed to read the input!\n", stderr);
-		exit(EXIT_FAILURE);
-	}
-
-	if (feof(stdin)) {
-		fputs("End of line!\n", stderr);
 		exit(EXIT_FAILURE);
 	}
 
 	return line;
 }
 
-char **parse(char *buf) {
+char **parse(char *line) {
 	int count = 0;
-	char *token = strtok(buf, " \n");
-	char **tokens = calloc(TOKENS_CAPACITY, sizeof(char));
-
-	if (!(tokens)) {
-		fputs("Failed to allocate memory!\n", stderr);
-		exit(EXIT_FAILURE);
-	}
+	char *token = strtok(line, " \n");
+	char **tokens = arena_alloc(&a, TOKENS_CAPACITY);
 
 	while (token != NULL) {
 		tokens[count++] = token;
-
-		if (tokens >= (char **)TOKENS_CAPACITY) {
-			tokens = realloc(tokens, 2 * INPUT_CAPACITY);
-			if (!(tokens)) {
-				fputs("Failed to reallocate memory!\n", stderr);
-				exit(EXIT_FAILURE);
-			}
-		}
 		token = strtok(NULL, " \n");
 	}
+
 	tokens[count] = NULL;
 	return tokens;
-} 
-
-int cd_function(char **args) {
-	if (args[1] == NULL) {
-		fputs("cd (directory)\n", stderr);
-	} else if (chdir(args[1]) != 0) {
-		fputs("cd\n", stderr);
-	} 
-
-	return 1;
 }
 
 char *define_functions[] = {
 	"cd"
 };
 
+int length(void) {
+	return (sizeof(define_functions) / sizeof(char *));
+}
+
+int cd_function(char **args) {
+	if (args[1] == NULL) {
+		fputs("cd (directory)\n", stderr);
+	} else if (chdir(args[1]) != 0) {
+		fputs("cd\n", stderr);
+	}
+
+	return EXIT_FAILURE;
+} 
+
 int (*exec_functions[]) (char **args) = {
 	&cd_function
 };
-
-int length(void) {
-	return (sizeof(define_functions) / (sizeof(char*)));
-}
 
 int start(char **args) {
 	int status = 0;
@@ -80,7 +64,7 @@ int start(char **args) {
 
 	if (pid == 0) {
 		if (execvp(args[0], args) == -1) {
-			fputs("Helish!\n", stderr);
+			fputs("Directory not found!\n", stderr);
 		}
 	} else if (pid < 0) {
 		fputs("Failed to create a process!\n", stderr);
@@ -91,7 +75,7 @@ int start(char **args) {
 		} while (!(WIFEXITED(status)) && (!(WIFSIGNALED(status))));
 	}
 
-	return 1;
+	return EXIT_FAILURE;
 }
 
 int exec(char **args) {
@@ -100,15 +84,18 @@ int exec(char **args) {
 	}
 
 	for (int i = 0; i < length(); i++) {
-		printf("length: %d\n", length());
 		if (strcmp(args[0], define_functions[i]) == 0) {
-			return (*exec_functions[i])(args);
+			return (*exec_functions[i]) (args);
 		}
 	}
+
 	return start(args);
 }
 
 int main(void) {
+	char buf[INPUT_CAPACITY + TOKENS_CAPACITY];
+	arena_init(&a, buf, sizeof(buf));
+
 	char *line = NULL;
 	char **args = NULL;
 	int status = 0;
@@ -119,9 +106,8 @@ int main(void) {
 		args = parse(line);
 		status = exec(args);
 
-		free(line);
-		free(args);
+		arena_free(&a);
 	} while (status);
 
-	return 0;
+	return EXIT_SUCCESS;
 }
