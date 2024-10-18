@@ -1,20 +1,20 @@
-#include <unistd.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <dirent.h>
-#include <curl/curl.h>
+
 #include <sys/wait.h>
-#include <sys/types.h>
 #include <sys/stat.h>
 
 #include "memory.h"
 
-#define TOKENS_CAPACITY 4096
-#define INPUT_CAPACITY 1024
+#define INPUT_CAPACITY 4096
+#define TOKEN_CAPACITY 1024
 
-Arena a = {0};
+Arena a_input = {0};
+Arena a_tokens = {0};
 
 char *input(void) {
-	char *line = arena_alloc(&a, INPUT_CAPACITY);
+	char *line = arena_alloc(&a_input, INPUT_CAPACITY);
 	if (fgets(line, INPUT_CAPACITY, stdin) == NULL) {
 		fputs("Failed to read input!\n", stderr);
 	}
@@ -22,37 +22,22 @@ char *input(void) {
 	return line;
 }
 
-char **parse(char *line) {
+char **tokenize(char *line) {
 	usize count = 0;
-	char *token = strtok(line, " \n");
-	char **tokens = arena_alloc(&a, TOKENS_CAPACITY);
+	char *token = strtok(line, " \t\r\n\a");
+	char **tokens = arena_alloc(&a_tokens, TOKEN_CAPACITY);
 
 	while (token != NULL) {
 		tokens[count++] = token;
-		token = strtok(NULL, " \n");
+		token = strtok(NULL, " \t\r\n\a");
 	}
 
 	tokens[count] = NULL;
 	return tokens;
 }
 
-char *define_functions[] = {
-	"cd",
-	"rm",
-	"mv",
-	"mkdir",
-	"touch",
-	"cat",
-	"echo",
-	"ls",
-	"clear",
-	"grep",
-	"curl",
-	"cp"
-};
-
-usize length(void) {
-	return (sizeof(define_functions) / sizeof(char *));
+i8 exit_function(void) {
+	exit(1);
 }
 
 i8 cd_function(char **args) {
@@ -60,7 +45,7 @@ i8 cd_function(char **args) {
 		fputs("cd <directory>\n", stderr);
 	}
 
-	(void) chdir(args[1]);
+	chdir(args[1]);
 	return 1;
 }
 
@@ -73,13 +58,12 @@ i8 rm_function(char **args) {
 	return 1;
 }
 
-i8 mv_function(char **args) {
-	if ((args[1] == NULL) || (args[2] == NULL)) {
-		fputs("mv <file> <file>\n", stderr);
+i8 move_function(char **args) {
+	if ((args[1] == NULL) || (args[1] == NULL)) {
+		fputs("move <file> <file>\n", stderr);
 	}
 
 	rename(args[1], args[2]);
-	remove(args[1]);
 	return 1;
 }
 
@@ -91,6 +75,7 @@ i8 mkdir_function(char **args) {
 	mkdir(args[1], S_IRWXU | S_IRWXG | S_IRWXO);
 	return 1;
 }
+
 
 i8 touch_function(char **args) {
 	if (args[1] == NULL) {
@@ -105,35 +90,7 @@ i8 touch_function(char **args) {
 	return 1;
 }
 
-// not done.
-i8 cat_function(char **args) {
-	if (args[1] == NULL) {
-		fputs("cat <file>\n", stderr);
-	}
-
-	unsigned char buf[1 << 12];
-
-	FILE *f = fopen(args[1], "r");
-	if (f != NULL) {
-		while (1) {
-			usize read_buf = fread(buf, 1, sizeof(buf), f);
-			if (read_buf == 0) {
-				break;
-			}
-			printf("%s\n", buf);
-		}
-		fclose(f);
-	}
-
-	return 1;
-}
-
-// not done.
 i8 echo_function(char **args) {
-	if (args[1] == NULL) {
-		fputs("echo <message>\n", stderr);
-	}
-
 	printf("%s\n", args[1]);
 	return 1;
 }
@@ -153,73 +110,17 @@ i8 ls_function(char **args) {
 	} else if (args[1] != NULL) {
 		dir_r = opendir(args[1]);
 		if (dir_r != NULL) {
-			while ((dirent_r = readdir(dir_r)) != NULL) {
+			while((dirent_r = readdir(dir_r)) != NULL) {
 				printf("%s\n", dirent_r->d_name);
 			}
-			closedir(dir_r);
 		}
+		closedir(dir_r);
 	}
-
 	return 1;
 }
 
-i8 clear_function(char **args) {
-	args[1] = NULL;
-
+i8 clear_function(void) {
 	fputs("\e[1;1H\e[2J", stdout);
-
-	return 1;
-}
-
-i8 grep_function(char **args) {
-	if ((args[1] == NULL) || (args[2] == NULL)) {
-		fputs("grep <message> <file>\n", stderr);
-	}
-
-	unsigned char buf[1 << 12];
-
-	FILE *f = fopen(args[2], "r");
-	if (f != NULL) {
-		while (1) {
-			usize read_buf = fread(buf, 1, sizeof(buf), f);
-			if (read_buf == 0) {
-				break;
-			}
-
-			char *result = strstr((char *)buf, args[1]);
-			printf("%s\n", result);
-		}
-		fclose(f);
-	}
- 
-	return 1;
-}
-
-i8 curl_function(char **args) {
-	if ((args[1] == NULL) || (args[2] == NULL)) {
-		fputs("curl <url> <output>\n", stderr);
-	}
-
-	CURL *curl;
-	curl = curl_easy_init();
-	CURLcode res = 0;
-
-	if (curl) {
-		FILE *f = fopen(args[2], "w");
-		if (f != NULL) {
-			curl_easy_setopt(curl, CURLOPT_URL, args[1]);
-			curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-			curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, NULL);
-			curl_easy_setopt(curl, CURLOPT_WRITEDATA, f);
-			res = curl_easy_perform(curl);
-
-			if (res == CURLE_OK) {
-				curl_easy_cleanup(curl);
-			}
-			fclose(f);
-		}
-	}
-
 	return 1;
 }
 
@@ -228,86 +129,90 @@ i8 cp_function(char **args) {
 		fputs("cp <file> <file>\n", stderr);
 	}
 
-	unsigned char buf[1 << 12];
+	char buf[4096] = {0};
 
 	FILE *f1 = fopen(args[1], "r");
 	FILE *f2 = fopen(args[2], "w");
 	if ((f1 != NULL) && (f2 != NULL)) {
 		while (1) {
-			size_t read_buf = fread(buf, 1, sizeof(buf), f1);
+			usize read_buf = fread(buf, 1, sizeof(buf), f1);
 			if (read_buf == 0) {
 				break;
 			}
-			fwrite(buf, 1, read_buf, f2);
+
+			fwrite(buf, 1, sizeof(buf), f2);
 		}
 		fclose(f1);
 		fclose(f2);
 	}
-
 	return 1;
 }
-
-i8 (*exec_functions[]) (char **args) = {
-	&cd_function,
-	&rm_function,
-	&mv_function,
-	&mkdir_function,
-	&touch_function,
-	&cat_function,
-	&echo_function,
-	&ls_function,
-	&clear_function,
-	&grep_function,
-	&curl_function,
-	&cp_function
-};
 
 i8 start(char **args) {
 	int status = 0;
 	pid_t pid = fork();
 
 	if (pid == 0) {
-		if (execvp(args[0], args) == -1) {
-			fputs("Command not found!\n", stderr);
-		}
+		execvp(args[0], args);
 	} else if (pid < 0) {
 		fputs("Failed to create a process!\n", stderr);
 	} else {
 		do {
 			waitpid(pid, &status, WUNTRACED);
 		} while (!(WIFEXITED(status)) && (!(WIFSIGNALED(status))));
-	}
-
+	} 
 	return 1;
 }
 
-i8 exec(char **args) {
-	for (usize i = 0; i < length(); i++) {
-		if (strcmp(args[0], define_functions[i]) == 0) {
-			return (*exec_functions[i]) (args);
-		}
-	} 
+i8 parse(char **args) {
+	if (strcmp(args[0], "cd") == 0) {
+		return cd_function(args);
+	} else if (strcmp(args[0], "rm") == 0) {
+		return rm_function(args);
+	} else if (strcmp(args[0], "move") == 0) {
+		return move_function(args);
+	} else if (strcmp(args[0], "mkdir") == 0) {
+		return mkdir_function(args);
+	} else if (strcmp(args[0], "touch") == 0) {
+		return touch_function(args);
+	} else if (strcmp(args[0], "echo") == 0) {
+		return echo_function(args);
+	} else if (strcmp(args[0], "ls") == 0) {
+		return ls_function(args);
+	} else if (strcmp(args[0], "clear") == 0) {
+		return clear_function();
+	} else if (strcmp(args[0], "cp") == 0) {
+		return cp_function(args);
+	} else if (strcmp(args[0], "exit") == 0) {
+		return exit_function();
+	} else {
+		fputs("Command not found!\n", stderr);
+	}
 
 	return start(args);
 }
 
 int main(void) {
-	char buf[INPUT_CAPACITY + TOKENS_CAPACITY];
-	arena_init(&a, buf, sizeof(buf));
+	char buf_input[INPUT_CAPACITY] = {0};
+	char buf_token[TOKEN_CAPACITY] = {0};
 
+	arena_init(&a_input, buf_input, sizeof(buf_input));
+	arena_init(&a_tokens, buf_token, sizeof(buf_token));
+
+	i8 status = 0;
 	char *line = NULL;
 	char **args = NULL;
-	i8 status = 0;
 
 	do {
 		printf("> ");
 
 		line = input();
-		args = parse(line);
-		status = exec(args);
+		args = tokenize(line);
+		status = parse(args);
 
-		arena_free(&a);
+		arena_free(&a_input);
+		arena_free(&a_tokens);
 	} while (status);
 
-	return 1;
+	return 0;
 }
