@@ -7,29 +7,33 @@
 
 #include "memory.h"
 
-#define INPUT_CAPACITY 4096
-#define TOKEN_CAPACITY 1024
+#define INPUT 2048 
+#define TOKEN 4096 
 
 Arena a_input = {0};
-Arena a_tokens = {0};
+Arena a_token = {0};
 
 char *input(void) {
-	char *line = arena_alloc(&a_input, INPUT_CAPACITY);
-	if (fgets(line, INPUT_CAPACITY, stdin) == NULL) {
+	char *input = arena_alloc(&a_input, INPUT);
+	char *line = arena_alloc(&a_token, TOKEN);
+
+	if (fgets(line, TOKEN, stdin) == NULL) {
 		fputs("Failed to read input!\n", stderr);
 	}
 
+	line[strcspn(line, "\n")] = '\0';
+	memcpy(input, line, strlen(line) + 1);
 	return line;
 }
 
 char **tokenize(char *line) {
 	usize count = 0;
-	char *token = strtok(line, " \t\r\n\a");
-	char **tokens = arena_alloc(&a_tokens, TOKEN_CAPACITY);
+	char *token = strtok(line, " ");
+	char **tokens = arena_alloc(&a_token, 0);
 
 	while (token != NULL) {
 		tokens[count++] = token;
-		token = strtok(NULL, " \t\r\n\a");
+		token = strtok(NULL, " ");
 	}
 
 	tokens[count] = NULL;
@@ -82,6 +86,7 @@ i8 touch_function(char **args) {
 		fputs("touch <file>\n", stderr);
 	}
 
+
 	FILE *f = fopen(args[1], "w");
 	if (f != NULL) {
 		fclose(f);
@@ -90,8 +95,8 @@ i8 touch_function(char **args) {
 	return 1;
 }
 
-i8 echo_function(char **args) {
-	printf("%s\n", args[1]);
+i8 echo_function(char *input) {
+	printf("%s\n", input + 4);
 	return 1;
 }
 
@@ -164,7 +169,7 @@ i8 start(char **args) {
 	return 1;
 }
 
-i8 parse(char **args) {
+i8 parse(char **args, char *input) {
 	if (strcmp(args[0], "cd") == 0) {
 		return cd_function(args);
 	} else if (strcmp(args[0], "rm") == 0) {
@@ -176,7 +181,7 @@ i8 parse(char **args) {
 	} else if (strcmp(args[0], "touch") == 0) {
 		return touch_function(args);
 	} else if (strcmp(args[0], "echo") == 0) {
-		return echo_function(args);
+		return echo_function(input);
 	} else if (strcmp(args[0], "ls") == 0) {
 		return ls_function(args);
 	} else if (strcmp(args[0], "clear") == 0) {
@@ -193,11 +198,11 @@ i8 parse(char **args) {
 }
 
 int main(void) {
-	char buf_input[INPUT_CAPACITY] = {0};
-	char buf_token[TOKEN_CAPACITY] = {0};
+	char buf_input[INPUT] = {0};
+	char buf_token[TOKEN] = {0};
 
-	arena_init(&a_input, buf_input, sizeof(buf_input));
-	arena_init(&a_tokens, buf_token, sizeof(buf_token));
+	arena_init(&a_input, buf_input, INPUT);
+	arena_init(&a_token, buf_token, TOKEN);
 
 	i8 status = 0;
 	char *line = NULL;
@@ -208,10 +213,10 @@ int main(void) {
 
 		line = input();
 		args = tokenize(line);
-		status = parse(args);
+		status = parse(args, buf_input);
 
 		arena_free(&a_input);
-		arena_free(&a_tokens);
+		arena_free(&a_token);
 	} while (status);
 
 	return 0;
