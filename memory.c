@@ -2,10 +2,9 @@
 
 void *arena_alloc(Arena *a, usize size) {
 	if (a->offset + size <= a->buf_len) {
-		void *ptr = &a->buf[a->offset];
 		a->offset += size;
-		memset(ptr, 0, size);
-		return ptr;
+		memset(&a->buf[a->offset], 0, size);
+		return &a->buf[a->offset];
 	}
 	return NULL;
 }
@@ -19,3 +18,20 @@ void arena_init(Arena *a, void *buf, usize buf_len) {
 void arena_free(Arena *a) {
 	a->offset = 0;
 }
+
+void buffer_write(Buffer *b, char data) {
+	b->buf[b->head] = data;
+	b->head = (b->head + 1) % COMMANDS;
+	memset(&b->buf[b->head], 0, data);
+
+	if (b->head == b->tail) {
+		b->tail = (b->tail + 1) % COMMANDS;
+	}
+}
+
+void buffer_init(Buffer *b, void *buf) {
+	b->buf = (char *)buf;
+	b->head = 0;
+	b->tail = 0;
+}
+
